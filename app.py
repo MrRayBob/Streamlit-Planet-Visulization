@@ -3,12 +3,32 @@ import plotly.graph_objects as go
 import numpy as np
 from PIL import Image
 
-st.title("Interactive 3D Jupiter Globe")
+st.title("Interactive 3D Globe")
+
+# Planet Selector in the sidebar
+planet = st.sidebar.selectbox(
+    "Planet Selector",
+    ("Earth", "Jupiter", "Mars")
+)
+# Resolution Selector in the sidebar
+resolution = st.sidebar.selectbox(
+    "Resolution Selector",
+    (256, 512, 1024, 2048), index=0, 
+    help="Higher resolution will provide a smoother globe but may take longer to load."
+)
 
 # Load the Jupiter texture
-texture_file = "2k_jupiter.jpg"
+match (planet):
+    case "Earth":
+        texture_file = "2k_earth.jpg"
+    case "Jupiter":
+        texture_file = "2k_jupiter.jpg"
+    case "Mars":
+        texture_file = "2k_mars.jpg"
+    case _:
+        texture_file = "2k_earth.jpg" # default to Earth if invalid selection
 try:
-    img = Image.open(texture_file).convert("RGB").transpose(Image.Transpose.ROTATE_90)
+    img = Image.open(texture_file).convert("RGB").transpose(Image.Transpose.ROTATE_270).transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     img_array = np.array(img)
     has_texture = True
 except Exception as e:
@@ -29,7 +49,7 @@ fig = go.Figure()
 
 if has_texture:
     height, width, _ = img_array.shape
-    resolution = min(1024, min(height, width))
+    resolution = min(resolution, min(height, width))
     u, v, x, y, z = build_sphere_mesh(resolution)
 
     u_idx = (np.linspace(0, width - 1, resolution)).astype(int)
@@ -92,5 +112,5 @@ fig.update_layout(
     paper_bgcolor='black'
 )
 
-st.plotly_chart(fig, use_container_width=True) # Display Planet
-st.write("Rotate with click and drag • Zoom with scroll")
+st.plotly_chart(fig, width='stretch') # Display Planet
+
