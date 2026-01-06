@@ -8,60 +8,67 @@ st.title("Interactive 3D Jupiter Globe")
 # Load the Jupiter texture
 texture_file = "2k_jupiter.jpg"
 try:
-    img = Image.open(texture_file)
+    img = Image.open(texture_file).convert("RGB").transpose(Image.Transpose.ROTATE_90)
     img_array = np.array(img)
     has_texture = True
 except Exception as e:
     st.warning(f"Could not load texture: {e}. Make sure {texture_file} is in the same directory as app.py")
     has_texture = False
 
-# Create a sphere mesh with higher resolution for better texture mapping
-resolution = 100
-u = np.linspace(0, 2 * np.pi, resolution)
-v = np.linspace(0, np.pi, resolution)
-x = np.outer(np.cos(u), np.sin(v))
-y = np.outer(np.sin(u), np.sin(v))
-z = np.outer(np.ones(np.size(u)), np.cos(v))
+def build_sphere_mesh(resolution: int):
+    u = np.linspace(0, 2 * np.pi, resolution)
+    v = np.linspace(0, np.pi, resolution)
+    uu, vv = np.meshgrid(u, v, indexing="ij")
+    x = np.cos(uu) * np.sin(vv)
+    y = np.sin(uu) * np.sin(vv)
+    z = np.cos(vv)
+    return u, v, x, y, z
 
 # Create the figure
 fig = go.Figure()
 
 if has_texture:
-    # Resize texture to match sphere resolution
-    img_resized = img.resize((resolution, resolution))
-    img_array_resized = np.array(img_resized)
-    
-    # Flip vertically to match sphere orientation
-    img_array_resized = np.flipud(img_array_resized)
-    
-    # Calculate brightness value for each pixel (used to map colors)
-    surfacecolor = np.mean(img_array_resized, axis=2)
-    
-    # Build colorscale by sampling colors from entire image
-    # Sort pixels by brightness and sample evenly to capture all color variations
-    pixels = img_array_resized.reshape(-1, 3)
-    brightness = surfacecolor.flatten()
-    sorted_indices = np.argsort(brightness)
-    
-    # Sample 256 colors evenly across brightness range
-    n_colors = 256
-    sample_indices = np.linspace(0, len(sorted_indices)-1, n_colors).astype(int)
-    colorscale = []
-    for i, idx in enumerate(sample_indices):
-        rgb = pixels[sorted_indices[idx]]
-        colorscale.append([i/(n_colors-1), f'rgb({rgb[0]},{rgb[1]},{rgb[2]})'])
-    
-    # Add sphere with custom colorscale and lighting
-    fig.add_trace(go.Surface(
-        x=x, y=y, z=z,
-        surfacecolor=surfacecolor,
-        colorscale=colorscale,
-        showscale=False,
-        hoverinfo='skip',
-        lighting=dict(ambient=0.6, diffuse=0.8, specular=0.1, roughness=0.9)
+    height, width, _ = img_array.shape
+    resolution = min(1024, min(height, width))
+    u, v, x, y, z = build_sphere_mesh(resolution)
+
+    u_idx = (np.linspace(0, width - 1, resolution)).astype(int)
+    v_idx = (np.linspace(0, height - 1, resolution)).astype(int)
+    texture = img_array[np.ix_(v_idx, u_idx)]
+
+    colors = texture.reshape(-1, 3)
+    vertex_colors = [f"rgb({r},{g},{b})" for r, g, b in colors]
+
+    res_v = resolution
+    faces_i = []
+    faces_j = []
+    faces_k = []
+    for i in range(resolution - 1):
+        for j in range(res_v - 1):
+            v0 = i * res_v + j
+            v1 = v0 + 1
+            v2 = v0 + res_v
+            v3 = v2 + 1
+            faces_i.extend([v0, v1])
+            faces_j.extend([v2, v2])
+            faces_k.extend([v1, v3])
+
+    fig.add_trace(go.Mesh3d(
+        x=x.reshape(-1),
+        y=y.reshape(-1),
+        z=z.reshape(-1),
+        i=faces_i,
+        j=faces_j,
+        k=faces_k,
+        vertexcolor=vertex_colors,
+        flatshading=False,
+        lighting=dict(ambient=0.7, diffuse=0.8, specular=0.2, roughness=0.9),
+        hoverinfo="skip"
     ))
 else:
     # Fallback to orange sphere
+    resolution = 100
+    _, _, x, y, z = build_sphere_mesh(resolution)
     fig.add_trace(go.Surface(
         x=x, y=y, z=z,
         colorscale=[[0, 'rgb(255, 140, 0)'], [1, 'rgb(255, 165, 0)']],
@@ -77,9 +84,7 @@ fig.update_layout(
         zaxis=dict(visible=False),
         bgcolor='black',
         aspectmode='data',
-        camera=dict(
-            eye=dict(x=1.5, y=1.5, z=1.5)
-        )
+        camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
     ),
     width=700,
     height=700,
@@ -87,7 +92,5 @@ fig.update_layout(
     paper_bgcolor='black'
 )
 
-# Display in Streamlit
-st.plotly_chart(fig, use_container_width=True)
-
-st.write("You can interact with the globe by clicking and dragging to rotate, and scrolling to zoom.")
+st.plotly_chart(fig, use_container_width=True) # Display Planet
+st.write("Rotate with click and drag • Zoom with scroll")
