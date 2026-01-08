@@ -17,7 +17,7 @@ resolution = st.sidebar.selectbox(
     help="Higher resolution will provide a smoother globe but may take longer to load."
 )
 
-# Load the Jupiter texture
+# Load the texture file based on planet selection
 match (planet):
     case "Earth":
         texture_file = "2k_earth.jpg"
@@ -27,13 +27,6 @@ match (planet):
         texture_file = "2k_mars.jpg"
     case _:
         texture_file = "2k_earth.jpg" # default to Earth if invalid selection
-try:
-    img = Image.open(texture_file).convert("RGB").transpose(Image.Transpose.ROTATE_270).transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-    img_array = np.array(img)
-    has_texture = True
-except Exception as e:
-    st.warning(f"Could not load texture: {e}. Make sure {texture_file} is in the same directory as app.py")
-    has_texture = False
 
 def build_sphere_mesh(resolution: int):
     u = np.linspace(0, 2 * np.pi, resolution)
@@ -44,18 +37,18 @@ def build_sphere_mesh(resolution: int):
     z = np.cos(vv)
     return u, v, x, y, z
 
-# Create the figure
-fig = go.Figure()
-
-if has_texture:
+@st.cache_data(show_spinner=False)
+def build_textured_globe(texture_path: str, resolution: int):
+    # Cache image load + mesh + vertex colors so UI changes do not rebuild the globe.
+    img = Image.open(texture_path).convert("RGB").transpose(Image.Transpose.ROTATE_270).transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    img_array = np.array(img)
     height, width, _ = img_array.shape
     resolution = min(resolution, min(height, width))
-    u, v, x, y, z = build_sphere_mesh(resolution)
+    _, _, x, y, z = build_sphere_mesh(resolution)
 
     u_idx = (np.linspace(0, width - 1, resolution)).astype(int)
     v_idx = (np.linspace(0, height - 1, resolution)).astype(int)
     texture = img_array[np.ix_(v_idx, u_idx)]
-
     colors = texture.reshape(-1, 3)
     vertex_colors = [f"rgb({r},{g},{b})" for r, g, b in colors]
 
@@ -73,10 +66,31 @@ if has_texture:
             faces_j.extend([v2, v2])
             faces_k.extend([v1, v3])
 
+    return x.reshape(-1), y.reshape(-1), z.reshape(-1), faces_i, faces_j, faces_k, vertex_colors
+
+def lonlat_to_xyz(lon_deg, lat_deg, radius=1.01):
+    lon = np.deg2rad(lon_deg)
+    lat = np.deg2rad(lat_deg)
+    x = radius * np.cos(lat) * np.cos(lon)
+    y = radius * np.cos(lat) * np.sin(lon)
+    z = radius * np.sin(lat)
+    return x, y, z
+
+try:
+    x, y, z, faces_i, faces_j, faces_k, vertex_colors = build_textured_globe(texture_file, resolution)
+    has_texture = True
+except Exception as e:
+    st.warning(f"Could not load texture: {e}. Make sure {texture_file} is in the same directory as app.py")
+    has_texture = False
+
+# Create the figure
+fig = go.Figure()
+
+if has_texture:
     fig.add_trace(go.Mesh3d(
-        x=x.reshape(-1),
-        y=y.reshape(-1),
-        z=z.reshape(-1),
+        x=x,
+        y=y,
+        z=z,
         i=faces_i,
         j=faces_j,
         k=faces_k,
@@ -85,8 +99,33 @@ if has_texture:
         lighting=dict(ambient=0.7, diffuse=0.8, specular=0.2, roughness=0.9),
         hoverinfo="skip"
     ))
+    markers = [
+        {"lon": 0, "lat": 0, "label": "Prime Meridian", "color": "white", "size": 10},
+        {"lon": 45, "lat": 20, "label": "Spot A", "color": "orange", "size": 10},
+    ]
+    if markers:
+        xs, ys, zs = [], [], []
+        labels, colors, sizes = [], [], []
+        for m in markers:
+            mx, my, mz = lonlat_to_xyz(m["lon"], m["lat"])
+            xs.append(mx)
+            ys.append(my)
+            zs.append(mz)
+            labels.append(m.get("label", ""))
+            colors.append(m.get("color", "red"))
+            sizes.append(m.get("size", 6))
+        fig.add_trace(go.Scatter3d(
+            x=xs,
+            y=ys,
+            z=zs,
+            mode="markers+text",
+            text=labels,
+            textposition="top center",
+            marker=dict(size=sizes, color=colors, opacity=0.95),
+            hoverinfo="text"
+        ))
 else:
-    # Fallback to orange sphere
+    # If the texture file is missing, fall back to a simple orange sphere.
     resolution = 100
     _, _, x, y, z = build_sphere_mesh(resolution)
     fig.add_trace(go.Surface(
